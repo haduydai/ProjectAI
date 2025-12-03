@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import cv2
 from PIL import Image
+from streamlit_drawable_canvas import st_canvas # Thư viện mới
 
 # 1. Cấu hình trang Web
 st.set_page_config(
@@ -11,7 +12,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 2. Hàm load model (Dùng Cache để không phải load lại mỗi lần f5)
+# 2. Hàm load model
 @st.cache_resource
 def load_my_model():
     model_path = 'models/digit_model.h5'
@@ -23,69 +24,104 @@ def load_my_model():
 
 # 3. Giao diện chính
 st.title("🤖 Demo Nhận Diện Số Viết Tay")
-st.write("Mô hình: **LeNet-5** | Dữ liệu: **DIDADATASET**")
-st.write("---")
+st.write("Mô hình: **LeNet-5** | Dữ liệu: **DIDADATASET**"),
 
 # Load model
 model = load_my_model()
 
 if model is None:
     st.error("❌ Không tìm thấy file 'models/digit_model.h5'. Hãy chạy file train.py trước!")
-else:
-    # 4. Khu vực upload ảnh
-    uploaded_file = st.file_uploader("📤 Tải ảnh chứa số (0-9) lên đây:", type=["jpg", "png", "jpeg"])
+    st.stop() # Dừng lại nếu không có model
+
+# --- TẠO 2 TAB CHỨC NĂNG ---
+tab1, tab2 = st.tabs(["📤 Tải ảnh lên", "✍️ Vẽ trực tiếp"])
+
+# ================= TAB 1: UPLOAD ẢNH (Code cũ) =================
+with tab1:
+    uploaded_file = st.file_uploader("Tải ảnh chứa số (0-9):", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
-        # Chia cột để hiển thị ảnh gốc và ảnh sau xử lý
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2),
         
         with col1:
-            st.write("📸 **Ảnh gốc:**")
-            # Mở ảnh bằng thư viện PIL
+            st.write("📸 **Ảnh gốc:**"),
             image_pil = Image.open(uploaded_file)
             st.image(image_pil, use_container_width=True)
 
-        # --- XỬ LÝ ẢNH (Preprocessing) ---
-        # Bước A: Chuyển sang ảnh xám (Grayscale)
-        # Convert PIL -> Numpy array
-        img_array = np.array(image_pil.convert('L'))
-
-        # Bước B: Resize về 32x32 (Đúng chuẩn LeNet-5)
-        # Dùng OpenCV để resize chất lượng tốt hơn
+        # XỬ LÝ ẢNH
+        img_array = np.array(image_pil.convert('L')),
         img_resized = cv2.resize(img_array, (32, 32))
 
-        # Bước C: Đảo màu (Quan trọng!)
-        # AI học trên nền đen chữ trắng. Nếu ảnh tải lên là nền trắng chữ đen (giấy viết), ta phải đảo ngược.
-        # Logic: Nếu độ sáng trung bình > 127 (tức là ảnh sáng/nền trắng) -> Đảo.
+        # Đảo màu nếu ảnh là nền trắng chữ đen
         if np.mean(img_resized) > 127:
             img_resized = 255 - img_resized
 
-        # Bước D: Chuẩn hóa pixel về [0, 1] và Reshape
-        img_input = img_resized / 255.0
+        img_input = img_resized / 255.0,
         img_input = img_input.reshape(1, 32, 32, 1)
 
         with col2:
             st.write("🧠 **AI nhìn thấy:**")
-            st.image(img_resized, caption="32x32 px (Đã đảo màu)", width=150)
+            st.image(img_resized, caption="32x32 px", width=150)
 
-        # 5. Nút Dự đoán
-        if st.button("🔍 DỰ ĐOÁN NGAY", type="primary"):
-            with st.spinner('AI đang suy nghĩ...'):
-                # Model dự đoán
-                prediction = model.predict(img_input)
-                
-                # Lấy kết quả cao nhất
-                ket_qua = np.argmax(prediction)
-                do_chinh_xac = np.max(prediction) * 100
-                
-            # Hiển thị kết quả
+        # NÚT DỰ ĐOÁN
+        if st.button("🔍 DỰ ĐOÁN (Upload)", type="primary"):
+            prediction = model.predict(img_input)
+            ket_qua = np.argmax(prediction)
+            do_chinh_xac = np.max(prediction) * 100
+            
             st.success(f"Kết quả: **SỐ {ket_qua}**")
             st.info(f"Độ tự tin: **{do_chinh_xac:.2f}%**")
+            st.bar_chart(prediction[0])
+
+
+# ================= TAB 2: VẼ SỐ (Tính năng mới) =================
+with tab2:
+    st.write("Vẽ số vào khung bên dưới:")
+    
+    # Tạo Canvas
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 165, 0, 0.3)", 
+        stroke_width=15,      # Nét vẽ to một chút để khi resize không bị mất
+        stroke_color="#FFFFFF", # Bút màu TRẮNG
+        background_color="#000000", # Nền ĐEN (AI thích nền đen chữ trắng)
+        height=200,
+        width=200,
+        drawing_mode="freedraw",
+        key="canvas",
+    )
+
+    if st.button("🔍 DỰ ĐOÁN (Hình vẽ)", type="primary"):
+        if canvas_result.image_data is not None:
+            # Lấy dữ liệu ảnh từ Canvas
+            img_data = canvas_result.image_data.astype('uint8')
             
-            # Vẽ biểu đồ xác suất
-            st.write("Biểu đồ xác suất:")
+            # Canvas trả về RGBA -> Chuyển sang Grayscale
+            img_gray = cv2.cvtColor(img_data, cv2.COLOR_RGBA2GRAY)
+            
+            # Resize về 32x32
+            img_resized = cv2.resize(img_gray, (32, 32))
+            
+            # Lưu ý: Vì ta vẽ bút trắng nền đen nên KHÔNG CẦN ĐẢO MÀU nữa
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write("Kích thước thực:")
+                st.image(img_resized, caption="32x32 Input", width=100)
+            
+            # Chuẩn hóa
+            img_input = img_resized / 255.0
+            img_input = img_input.reshape(1, 32, 32, 1)
+            
+            # Dự đoán
+            prediction = model.predict(img_input)
+            ket_qua = np.argmax(prediction)
+            do_chinh_xac = np.max(prediction) * 100
+            
+            with col_b:
+                st.success(f"Kết quả: **SỐ {ket_qua}**")
+                st.write(f"Độ chính xác: {do_chinh_xac:.1f}%")
+            
             st.bar_chart(prediction[0])
 
 # Footer
-st.markdown("---")
-st.caption("Developed by Ha Duy Dai")
+st.markdown("---"),
